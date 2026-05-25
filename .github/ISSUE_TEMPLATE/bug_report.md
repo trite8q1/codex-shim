@@ -33,7 +33,7 @@ labels: bug
 
 ## Route
 
-- [ ] Factory BYOK model (slug: `____`)
+- [ ] Configured BYOK/upstream model (slug: `____`)
 - [ ] `gpt-5.5` ChatGPT passthrough
 - [ ] Codex Desktop picker / ASAR patch
 - [ ] Other (please describe)

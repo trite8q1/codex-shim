@@ -13,10 +13,11 @@ from urllib.request import urlopen
 
 from .catalog import codex_config_overrides, write_catalog, write_config
 from .settings import (
-    DEFAULT_FACTORY_SETTINGS,
+    DEFAULT_SETTINGS,
     DEFAULT_HOST,
     DEFAULT_PORT,
-    FactorySettings,
+    PROVIDER_NAME,
+    ModelSettings,
     chatgpt_passthrough_available,
     default_model_slug,
 )
@@ -36,7 +37,7 @@ MANAGED_END = "# <<< codex-shim managed <<<"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="codex-shim")
-    parser.add_argument("--settings", type=Path, default=DEFAULT_FACTORY_SETTINGS)
+    parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("generate")
@@ -115,11 +116,11 @@ def main(argv: list[str] | None = None) -> int:
 def _load_models(settings_path: Path):
     expanded = Path(settings_path).expanduser()
     try:
-        return FactorySettings(expanded).load()
+        return ModelSettings(expanded).load()
     except FileNotFoundError as exc:
         raise SystemExit(
             f"Settings file not found: {expanded}\n"
-            "Create it by saving custom models in Factory, or pass --settings /path/to/settings.json."
+            "Create ~/.codex-shim/models.json, or pass --settings /path/to/models.json."
         ) from exc
     except json.JSONDecodeError as exc:
         raise SystemExit(f"Settings file is not valid JSON: {expanded}: {exc}") from exc
@@ -145,7 +146,7 @@ def install_codex_config(settings_path: Path, port: int, model_slug: str | None 
         CODEX_CONFIG_BACKUP_PATH.write_text(original)
     cleaned = _remove_managed_config(original)
     cleaned = _remove_top_level_keys(cleaned, {"model", "model_provider", "model_catalog_json"})
-    cleaned = _remove_section(cleaned, "model_providers.factory_byok_shim")
+    cleaned = _remove_section(cleaned, f"model_providers.{PROVIDER_NAME}")
     top_block, provider_block = _managed_config_blocks(default_slug, port)
     CODEX_CONFIG_PATH.write_text(top_block + "\n" + cleaned.lstrip() + "\n" + provider_block)
     print(f"Installed shim config into {CODEX_CONFIG_PATH}.")
@@ -160,8 +161,8 @@ def list_models(settings_path: Path) -> int:
     rows.extend((model.slug, model.display_name, model.model, model.provider) for model in models)
     if not rows:
         print(
-            "No models available. Either save Factory custom models or sign in to Codex "
-            "(`codex login`) so ~/.codex/auth.json grants the gpt-5.5 passthrough.",
+            "No models available. Create ~/.codex-shim/models.json, pass --settings /path/to/models.json, "
+            "or run `codex login` so ~/.codex/auth.json grants the gpt-5.5 passthrough.",
             file=sys.stderr,
         )
         return 1
@@ -231,7 +232,7 @@ def restore_codex_config() -> None:
     if CODEX_CONFIG_PATH.exists():
         current = CODEX_CONFIG_PATH.read_text()
         restored = _remove_managed_config(current)
-        restored = _remove_section(restored, "model_providers.factory_byok_shim")
+        restored = _remove_section(restored, f"model_providers.{PROVIDER_NAME}")
         CODEX_CONFIG_PATH.write_text(restored.lstrip())
         print(f"Removed shim config from {CODEX_CONFIG_PATH}.")
 
@@ -417,14 +418,14 @@ end tell
 def _managed_config_blocks(default_slug: str, port: int) -> tuple[str, str]:
     top_block = f'''{MANAGED_BEGIN}
 model = "{default_slug}"
-model_provider = "factory_byok_shim"
+model_provider = "{PROVIDER_NAME}"
 model_catalog_json = "{CATALOG_PATH}"
 {MANAGED_END}
 '''
 
     provider_block = f'''{MANAGED_BEGIN}
-[model_providers.factory_byok_shim]
-name = "Factory BYOK Shim"
+[model_providers.{PROVIDER_NAME}]
+name = "Codex Shim"
 base_url = "http://127.0.0.1:{port}/v1"
 wire_api = "responses"
 experimental_bearer_token = "dummy"

@@ -49,8 +49,8 @@ Please include:
 - OS (macOS arm64 / x86_64 / Linux distro / WSL).
 - Output of `codex-shim status` and the last ~80 lines of
   `.codex-shim/shim.log` with API keys redacted.
-- Whether the model is a Factory BYOK entry or the `gpt-5.5` ChatGPT
-  passthrough.
+- Whether the model is a configured BYOK/upstream entry or the `gpt-5.5`
+  ChatGPT passthrough.
 - Minimal repro: the exact `codex-shim …` invocation and what you
   expected vs. what happened.
 

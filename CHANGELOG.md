@@ -18,6 +18,16 @@ and this project does not yet follow semantic versioning (pre-1.0).
 - `.github/ISSUE_TEMPLATE/` with structured bug and feature request templates.
 - `CHANGELOG.md` (this file).
 
+### Changed
+
+- Reframed the project around a generic all-model Codex shim instead of any
+  single upstream app or model store.
+- Made `~/.codex-shim/models.json` the canonical default settings file.
+- Renamed the generated Codex provider to `codex_shim` / "Codex Shim".
+- Settings now prefer a generic top-level `models` array with snake_case keys,
+  while still accepting `customModels` and camelCase aliases for existing
+  exports.
+
 ## 2026-05-25 — Auth-gated ChatGPT passthrough + docs hardening
 
 ### Added
@@ -26,13 +36,13 @@ and this project does not yet follow semantic versioning (pre-1.0).
   usable `tokens.access_token`. The synthetic `gpt-5.5` slug is now only
   advertised in `/health`, `/v1/models`, `codex-shim list`, and the generated
   `custom_model_catalog.json` while that token is present.
-- `_load_models()` in the CLI wraps `FactorySettings.load()` with actionable
+- `_load_models()` in the CLI wraps model settings loading with actionable
   errors for missing files and invalid JSON.
 - `_entrypoint()` in the CLI catches `BrokenPipeError` at the boundary so
   piping `codex-shim list` into `head`/`grep` exits cleanly instead of dumping
   a traceback.
-- Six regression tests covering auth-gating and CLI error UX (total: 20
-  passing).
+- Regression tests covering auth-gating, CLI error UX, settings aliases, and
+  catalog generation.
 
 ### Changed
 
@@ -41,11 +51,8 @@ and this project does not yet follow semantic versioning (pre-1.0).
 - `cli._resolve_model_slug("gpt-5.5", ...)` raises `SystemExit` telling the
   user to run `codex login` when auth.json is missing, instead of returning a
   slug that would 401 on first request.
-- `default_model_slug` picks the first BYOK model when passthrough is not
-  usable, instead of unconditionally returning `gpt-5.5`.
-- `settings.FactorySettings.load()` returns `[]` for a missing
-  `~/.factory/settings.json` (the default), while a missing custom
-  `--settings` path still raises `FileNotFoundError`.
+- `default_model_slug` picks the first configured BYOK model when passthrough
+  is not usable, instead of unconditionally returning `gpt-5.5`.
 - README install section recommends `pip install -e .` as the primary path.
 - README benchmarking section: replaced an unsupported "7x fewer input tokens
   / 5–10x faster" claim with honest anecdata and a note that no reproducible
@@ -64,5 +71,4 @@ and this project does not yet follow semantic versioning (pre-1.0).
   calls, computer use, prompt catching/proxy patterns, benchmarking, security,
   limitations, troubleshooting, and contributing.
 - `pyproject.toml` build-system, `readme`, `license`, `authors`, `keywords`,
-  classifiers, and project URLs. Renamed package `codex-factory-shim` →
-  `codex-shim` to match the repo name.
+  classifiers, and project URLs.

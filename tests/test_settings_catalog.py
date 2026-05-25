@@ -6,7 +6,7 @@ import pytest
 
 from codex_shim import cli
 from codex_shim.catalog import catalog_entry, write_catalog
-from codex_shim.settings import FactorySettings, chatgpt_passthrough_available
+from codex_shim.settings import ModelSettings, chatgpt_passthrough_available
 
 
 @pytest.fixture
@@ -29,19 +29,36 @@ def test_duplicate_models_get_unique_display_slugs(tmp_path):
     settings.write_text(
         json.dumps(
             {
-                "customModels": [
-                    {"model": "gpt-5.5", "displayName": "Fast High", "provider": "openai", "baseUrl": "http://x/v1", "index": 1},
-                    {"model": "gpt-5.5", "displayName": "Fast Low", "provider": "openai", "baseUrl": "http://x/v1", "index": 2},
+                "models": [
+                    {"model": "gpt-5.5", "display_name": "Fast High", "provider": "openai", "base_url": "http://x/v1", "index": 1},
+                    {"model": "gpt-5.5", "display_name": "Fast Low", "provider": "openai", "base_url": "http://x/v1", "index": 2},
                 ]
             }
         )
     )
-    models = FactorySettings(settings).load()
+    models = ModelSettings(settings).load()
     assert [m.slug for m in models] == ["fast-high", "fast-low"]
 
 
+def test_legacy_custom_models_schema_still_loads(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps(
+            {
+                "customModels": [
+                    {"model": "legacy-model", "displayName": "Legacy Model", "provider": "openai", "baseUrl": "http://x/v1"}
+                ]
+            }
+        )
+    )
+    [model] = ModelSettings(settings).load()
+    assert model.slug == "legacy-model"
+    assert model.display_name == "Legacy Model"
+    assert model.base_url == "http://x/v1"
+
+
 def test_catalog_preserves_context_and_visibility():
-    model = FactorySettingsFixture.one()
+    model = ModelSettingsFixture.one()
     entry = catalog_entry(model)
     assert entry["slug"] == "claude-opus"
     assert entry["visibility"] == "list"
@@ -49,10 +66,10 @@ def test_catalog_preserves_context_and_visibility():
     assert "free" in entry["available_in_plans"]
 
 
-def test_default_missing_factory_settings_allows_chatgpt_only(monkeypatch, tmp_path):
+def test_default_missing_settings_allows_chatgpt_only(monkeypatch, tmp_path):
     missing = tmp_path / "missing-default.json"
-    monkeypatch.setattr("codex_shim.settings.DEFAULT_FACTORY_SETTINGS", missing)
-    assert FactorySettings(missing).load() == []
+    monkeypatch.setattr("codex_shim.settings.DEFAULT_SETTINGS", missing)
+    assert ModelSettings().load() == []
 
 
 def test_cli_load_models_missing_custom_settings_has_actionable_error(tmp_path):
@@ -60,7 +77,7 @@ def test_cli_load_models_missing_custom_settings_has_actionable_error(tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli._load_models(missing)
     assert "Settings file not found" in str(exc.value)
-    assert "--settings /path/to/settings.json" in str(exc.value)
+    assert "--settings /path/to/models.json" in str(exc.value)
 
 
 def test_cli_resolves_chatgpt_passthrough_slug_when_auth_present(auth_present):
@@ -124,7 +141,7 @@ def test_write_catalog_includes_gpt55_when_auth_present(tmp_path, auth_present):
     assert [model["slug"] for model in data["models"]] == ["gpt-5.5"]
 
 
-class FactorySettingsFixture:
+class ModelSettingsFixture:
     @staticmethod
     def one():
         import tempfile
@@ -134,17 +151,16 @@ class FactorySettingsFixture:
         path.write_text(
             json.dumps(
                 {
-                    "customModels": [
+                    "models": [
                         {
                             "model": "claude-opus",
-                            "displayName": "Claude Opus",
+                            "display_name": "Claude Opus",
                             "provider": "anthropic",
-                            "baseUrl": "http://anthropic",
-                            "maxContextLimit": 200000,
+                            "base_url": "http://anthropic",
+                            "max_context_limit": 200000,
                         }
                     ]
                 }
             )
         )
-        return FactorySettings(path).load()[0]
-
+        return ModelSettings(path).load()[0]

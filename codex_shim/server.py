@@ -10,11 +10,11 @@ from urllib.parse import urljoin
 from aiohttp import ClientSession, ClientTimeout, web
 
 from .settings import (
-    DEFAULT_FACTORY_SETTINGS,
+    DEFAULT_SETTINGS,
     DEFAULT_HOST,
     DEFAULT_PORT,
-    FactoryModel,
-    FactorySettings,
+    ModelSettings,
+    ShimModel,
     chatgpt_passthrough_available,
 )
 from .translate import (
@@ -28,8 +28,8 @@ from .translate import (
 
 
 class ShimServer:
-    def __init__(self, settings_path: Path = DEFAULT_FACTORY_SETTINGS):
-        self.settings = FactorySettings(settings_path)
+    def __init__(self, settings_path: Path = DEFAULT_SETTINGS):
+        self.settings = ModelSettings(settings_path)
         self.timeout = ClientTimeout(total=None, sock_connect=120, sock_read=None)
 
     def app(self) -> web.Application:
@@ -56,7 +56,7 @@ class ShimServer:
         data: list[dict[str, Any]] = []
         if chatgpt_passthrough_available():
             data.append({"id": "gpt-5.5", "object": "model", "created": now, "owned_by": "chatgpt"})
-        data.extend({"id": model.slug, "object": "model", "created": now, "owned_by": "factory"} for model in self.settings.load())
+        data.extend({"id": model.slug, "object": "model", "created": now, "owned_by": "codex-shim"} for model in self.settings.load())
         return web.json_response({"object": "list", "data": data})
 
     async def chat_completions(self, request: web.Request) -> web.StreamResponse:
@@ -69,7 +69,7 @@ class ShimServer:
         if route.is_anthropic:
             forwarded = chat_to_anthropic(body, route.model, route.max_output_tokens)
             return await self._post_anthropic(request, route, forwarded, as_responses=False)
-        raise web.HTTPBadGateway(text=f"Unsupported Factory provider: {route.provider}")
+        raise web.HTTPBadGateway(text=f"Unsupported model provider: {route.provider}")
 
     async def responses(self, request: web.Request) -> web.StreamResponse:
         body = await request.json()
@@ -84,7 +84,7 @@ class ShimServer:
         if route.is_anthropic:
             forwarded = responses_to_anthropic(body, route.model, route.max_output_tokens)
             return await self._post_anthropic(request, route, forwarded, as_responses=True)
-        raise web.HTTPBadGateway(text=f"Unsupported Factory provider: {route.provider}")
+        raise web.HTTPBadGateway(text=f"Unsupported model provider: {route.provider}")
 
     async def _chatgpt_passthrough(
         self, request: web.Request, body: dict[str, Any]
@@ -92,7 +92,7 @@ class ShimServer:
         """Forward a Responses request to chatgpt.com using the user's Codex auth.
 
         Lets the picker expose OpenAI's real GPT-5.5 (ChatGPT subscription) as a
-        first-class model alongside Factory BYOK entries.
+        first-class model alongside configured BYOK entries.
         """
         auth_path = Path("~/.codex/auth.json").expanduser()
         try:
@@ -138,7 +138,7 @@ class ShimServer:
                 pass
             return response
 
-    def _route(self, body: dict[str, Any]) -> FactoryModel:
+    def _route(self, body: dict[str, Any]) -> ShimModel:
         requested = str(body.get("model") or "")
         route = self.settings.by_slug_or_model(requested)
         if route is None:
@@ -146,7 +146,7 @@ class ShimServer:
         return route
 
     async def _post_openai_chat(
-        self, request: web.Request, route: FactoryModel, body: dict[str, Any], as_responses: bool
+        self, request: web.Request, route: ShimModel, body: dict[str, Any], as_responses: bool
     ) -> web.StreamResponse:
         url = _join_url(route.base_url, "/chat/completions")
         headers = _openai_headers(route)
@@ -162,7 +162,7 @@ class ShimServer:
         return web.json_response(payload)
 
     async def _post_anthropic(
-        self, request: web.Request, route: FactoryModel, body: dict[str, Any], as_responses: bool
+        self, request: web.Request, route: ShimModel, body: dict[str, Any], as_responses: bool
     ) -> web.StreamResponse:
         url = _join_url(route.base_url, "/messages")
         headers = _anthropic_headers(route)
@@ -178,7 +178,7 @@ class ShimServer:
         return web.json_response(anthropic_to_chat_response(payload, route.slug))
 
     async def _stream_openai_chat(
-        self, request: web.Request, upstream, route: FactoryModel, as_responses: bool
+        self, request: web.Request, upstream, route: ShimModel, as_responses: bool
     ) -> web.StreamResponse:
         response = _sse_response()
         await response.prepare(request)
@@ -213,7 +213,7 @@ class ShimServer:
         return response
 
     async def _stream_anthropic(
-        self, request: web.Request, upstream, route: FactoryModel, as_responses: bool
+        self, request: web.Request, upstream, route: ShimModel, as_responses: bool
     ) -> web.StreamResponse:
         response = _sse_response()
         await response.prepare(request)
@@ -736,14 +736,14 @@ def _join_url(base_url: str, endpoint: str) -> str:
     return urljoin(base + "/", "v1" + endpoint)
 
 
-def _openai_headers(route: FactoryModel) -> dict[str, str]:
+def _openai_headers(route: ShimModel) -> dict[str, str]:
     headers = {"Content-Type": "application/json", **route.extra_headers}
     if route.api_key:
         headers.setdefault("Authorization", f"Bearer {route.api_key}")
     return headers
 
 
-def _anthropic_headers(route: FactoryModel) -> dict[str, str]:
+def _anthropic_headers(route: ShimModel) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
         "anthropic-version": "2023-06-01",
@@ -864,7 +864,7 @@ async def _error_response(upstream) -> web.Response:
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--settings", type=Path, default=DEFAULT_FACTORY_SETTINGS)
+    parser.add_argument("--settings", type=Path, default=DEFAULT_SETTINGS)
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     args = parser.parse_args(argv)

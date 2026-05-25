@@ -1,7 +1,7 @@
 # codex-shim
 
-Run **Codex Desktop** against models from `~/.factory/settings.json` (or any
-compatible custom JSON file), plus an optional passthrough to your **ChatGPT
+Run **Codex Desktop** against any BYOK model you can describe in
+`~/.codex-shim/models.json`, plus an optional passthrough to your **ChatGPT
 subscription's Codex model** — without rebuilding Codex.
 
 The shim is a local Python/aiohttp server that exposes an OpenAI
@@ -21,7 +21,7 @@ expects.
 ## What this gives you
 
 Codex Desktop only shows models allowed by its server-side config. If you have
-OpenAI / Anthropic / Z.ai / DeepSeek / Gemini / OpenRouter / Factory BYOK models
+OpenAI / Anthropic / Z.ai / DeepSeek / Gemini / OpenRouter / local proxy models
 you want as first-class picker entries, this wires them in locally.
 
 The practical win is that Codex keeps its native UX while model routing moves
@@ -53,7 +53,7 @@ local:
 - Python 3.11+.
 - Codex CLI/Desktop installed and authenticated.
 - One of:
-  - `~/.factory/settings.json` with Factory custom models;
+  - `~/.codex-shim/models.json` with configured BYOK/upstream models;
   - a compatible JSON file passed with `--settings`;
   - `~/.codex/auth.json` containing `tokens.access_token` for ChatGPT/Codex
     passthrough-only use.
@@ -116,7 +116,7 @@ portable, but the convenience wrappers in `bin/` are POSIX shell scripts.
 ### 1. Generate the catalog and start the shim
 
 ```bash
-codex-shim generate          # reads ~/.factory/settings.json if present
+codex-shim generate          # reads ~/.codex-shim/models.json if present
 codex-shim start             # background daemon on 127.0.0.1:8765
 codex-shim list              # show generated slugs and upstream routes
 codex-shim status            # health probe + model count
@@ -150,7 +150,7 @@ block can be removed with:
 codex-shim disable
 ```
 
-After this, Codex Desktop sees every entry from `~/.factory/settings.json`,
+After this, Codex Desktop sees every entry from `~/.codex-shim/models.json`,
 plus the `GPT-5.5` ChatGPT passthrough slug if (and only if) `~/.codex/auth.json`
 holds a valid `tokens.access_token`.
 
@@ -181,48 +181,52 @@ codex-shim codex -- "inspect this repo and summarize the architecture"
 
 ## Custom config file
 
-The shim defaults to `~/.factory/settings.json` (the file Factory writes when
-you save BYOK custom models). If that file is missing, the shim still
-generates a catalog — and adds the `gpt-5.5` ChatGPT passthrough entry only
-when `~/.codex/auth.json` contains a valid `tokens.access_token`. You can
-point it at any compatible file:
+The shim defaults to `~/.codex-shim/models.json`. If that file is missing, the
+shim still generates a catalog — and adds the `gpt-5.5` ChatGPT passthrough
+entry only when `~/.codex/auth.json` contains a valid `tokens.access_token`.
+You can point it at any compatible file:
 
 ```bash
 codex-shim --settings /path/to/my-models.json generate
 codex-shim --settings /path/to/my-models.json start
 ```
 
-Schema expected (Factory's own format):
+Recommended schema:
 
 ```json
 {
-  "customModels": [
+  "models": [
     {
       "model": "gpt-5.5",
       "provider": "openai",
-      "baseUrl": "https://api.openai.com/v1",
-      "apiKey": "sk-…",
-      "displayName": "OpenAI GPT-5.5",
-      "maxContextLimit": 400000
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-…",
+      "display_name": "OpenAI GPT-5.5",
+      "max_context_limit": 400000
     },
     {
       "model": "claude-opus-4-7-20251109",
       "provider": "anthropic",
-      "baseUrl": "https://api.anthropic.com/v1",
-      "apiKey": "sk-ant-…",
-      "displayName": "Claude Opus 4.7"
+      "base_url": "https://api.anthropic.com/v1",
+      "api_key": "sk-ant-…",
+      "display_name": "Claude Opus 4.7"
     },
     {
       "model": "deepseek-v4-pro",
       "provider": "anthropic",
-      "baseUrl": "https://api.deepseek.com/anthropic",
-      "apiKey": "…",
-      "displayName": "DeepSeek V4 Pro",
-      "noImageSupport": true
+      "base_url": "https://api.deepseek.com/anthropic",
+      "api_key": "…",
+      "display_name": "DeepSeek V4 Pro",
+      "no_image_support": true
     }
   ]
 }
 ```
+
+The loader also accepts camelCase aliases (`baseUrl`, `apiKey`, `displayName`,
+`maxContextLimit`, `maxOutputTokens`, `noImageSupport`, `extraHeaders`) and a
+legacy top-level `customModels` array, so existing model config exports can be
+used directly.
 
 The shim **never copies your API keys** into the generated catalog. Keys stay
 in your settings file and are read fresh on every request.
@@ -239,11 +243,11 @@ Useful model fields:
 
 | field | behavior |
 |---|---|
-| `displayName` | Human-readable picker label. |
-| `maxContextLimit` | Catalog context window and compaction limits. |
-| `maxOutputTokens` | Default max output when translating to Anthropic. |
-| `noImageSupport` | When true, catalog advertises text-only input. |
-| `extraHeaders` | Optional upstream headers merged into requests. |
+| `display_name` | Human-readable picker label. |
+| `max_context_limit` | Catalog context window and compaction limits. |
+| `max_output_tokens` | Default max output when translating to Anthropic. |
+| `no_image_support` | When true, catalog advertises text-only input. |
+| `extra_headers` | Optional upstream headers merged into requests. |
 
 ---
 
@@ -338,7 +342,7 @@ mint a new token and the entry comes back automatically on the next
 The passthrough keeps Codex's native `/v1/responses` payload intact, changes the
 model to `gpt-5.5`, and sends your Codex access token as `Authorization: Bearer
 <access_token>` with the ChatGPT account id from `auth.json` when present. It
-bypasses Factory entirely and uses your ChatGPT subscription quota.
+bypasses configured BYOK routes entirely and uses your ChatGPT subscription quota.
 
 It is already in `.codex-shim/custom_model_catalog.json` after `codex-shim
 generate`. Select `GPT-5.5` in the picker, or run:
@@ -557,7 +561,7 @@ codex-shim status            health check + model count
 codex-shim stop              stop daemon
 codex-shim disable           remove managed config block and stop daemon
 codex-shim restart           stop, regenerate, and start daemon
-codex-shim list              list generated slugs and Factory routes
+codex-shim list              list generated slugs and upstream routes
 codex-shim model list        list slugs currently usable in the picker
 codex-shim model use <slug>  set the Desktop default model in managed config
 codex-shim codex -- <args>   exec `codex` CLI through inline shim overrides
@@ -627,7 +631,7 @@ codex-shim --port 8766 restart
 codex-shim --port 8766 app .
 ```
 
-### `~/.factory/settings.json` is missing
+### `~/.codex-shim/models.json` is missing
 
 That is fine for ChatGPT passthrough-only use, **provided** `~/.codex/auth.json`
 has a valid `tokens.access_token`. In that case `codex-shim generate` writes a
@@ -641,8 +645,8 @@ codex-shim --settings /path/to/my-models.json generate
 
 ### `codex-shim list` exits 1 with "No models available"
 
-You have neither Factory custom models in `~/.factory/settings.json` nor a
-valid Codex login. Pick one:
+You have neither configured models in `~/.codex-shim/models.json` nor a valid
+Codex login. Pick one:
 
 ```bash
 codex login                       # populate ~/.codex/auth.json
@@ -665,7 +669,7 @@ macOS picker patch.
 ### Model appears but requests 404
 
 The selected slug is not in the current generated catalog. Regenerate after
-editing `~/.factory/settings.json`:
+editing `~/.codex-shim/models.json` or the file passed with `--settings`:
 
 ```bash
 codex-shim generate
@@ -675,7 +679,7 @@ codex-model <slug>
 
 ### Upstream returns 401/403
 
-The API key in `~/.factory/settings.json` is wrong, expired, or missing a
+The API key in your model settings file is wrong, expired, or missing a
 provider-specific header. For ChatGPT passthrough, refresh Codex login so
 `~/.codex/auth.json` contains a valid `tokens.access_token`.
 
