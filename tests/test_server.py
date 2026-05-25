@@ -2,10 +2,24 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from codex_shim.server import ShimServer
+
+
+@pytest.fixture
+def auth_present(monkeypatch, tmp_path):
+    auth = tmp_path / "auth.json"
+    auth.write_text(json.dumps({"tokens": {"access_token": "stub", "account_id": "acct"}}))
+    monkeypatch.setattr("codex_shim.settings.DEFAULT_CODEX_AUTH", auth)
+    return auth
+
+
+@pytest.fixture
+def auth_missing(monkeypatch, tmp_path):
+    monkeypatch.setattr("codex_shim.settings.DEFAULT_CODEX_AUTH", tmp_path / "missing-auth.json")
 
 
 async def test_responses_routes_to_openai_chat(tmp_path):
@@ -57,7 +71,7 @@ async def test_responses_routes_to_openai_chat(tmp_path):
     await upstream_client.close()
 
 
-async def test_health_and_models_include_chatgpt_passthrough(tmp_path):
+async def test_health_and_models_include_chatgpt_passthrough_when_auth_present(tmp_path, auth_present):
     settings = tmp_path / "settings.json"
     settings.write_text(json.dumps({"customModels": []}))
     shim_client = TestClient(TestServer(ShimServer(settings).app()))
@@ -65,12 +79,32 @@ async def test_health_and_models_include_chatgpt_passthrough(tmp_path):
 
     health = await shim_client.get("/health")
     assert health.status == 200
-    assert (await health.json())["models"] == 1
+    body = await health.json()
+    assert body["models"] == 1
+    assert body["chatgpt_passthrough"] is True
 
     models = await shim_client.get("/v1/models")
     assert models.status == 200
     payload = await models.json()
     assert [model["id"] for model in payload["data"]] == ["gpt-5.5"]
+
+    await shim_client.close()
+
+
+async def test_health_and_models_hide_chatgpt_passthrough_when_auth_missing(tmp_path, auth_missing):
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"customModels": []}))
+    shim_client = TestClient(TestServer(ShimServer(settings).app()))
+    await shim_client.start_server()
+
+    health = await shim_client.get("/health")
+    body = await health.json()
+    assert body["models"] == 0
+    assert body["chatgpt_passthrough"] is False
+
+    models = await shim_client.get("/v1/models")
+    payload = await models.json()
+    assert payload["data"] == []
 
     await shim_client.close()
 

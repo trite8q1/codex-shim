@@ -8,9 +8,36 @@ from typing import Any
 
 
 DEFAULT_FACTORY_SETTINGS = Path.home() / ".factory" / "settings.json"
+DEFAULT_CODEX_AUTH = Path.home() / ".codex" / "auth.json"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 PROVIDER_NAME = "factory_byok_shim"
+
+
+def chatgpt_passthrough_available(auth_path: Path | None = None) -> bool:
+    """Return True if ~/.codex/auth.json holds a usable Codex access token.
+
+    Used to gate the synthetic gpt-5.5 picker entry so the shim only advertises
+    the ChatGPT passthrough when a request would actually succeed.
+
+    The default is looked up at call time so tests can monkeypatch
+    ``DEFAULT_CODEX_AUTH`` on the module.
+    """
+    if auth_path is None:
+        import sys as _sys
+
+        auth_path = getattr(_sys.modules[__name__], "DEFAULT_CODEX_AUTH")
+    expanded = Path(auth_path).expanduser()
+    if not expanded.exists():
+        return False
+    try:
+        data = json.loads(expanded.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    tokens = data.get("tokens") if isinstance(data, dict) else None
+    if not isinstance(tokens, dict):
+        return False
+    return bool(tokens.get("access_token"))
 
 
 def slugify(value: str) -> str:
@@ -124,7 +151,10 @@ def _int_or_none(value: Any) -> int | None:
 
 
 def default_model_slug(models: list[FactoryModel]) -> str:
-    if not models:
+    # Prefer the native ChatGPT passthrough when auth.json is usable; otherwise
+    # fall back to the first BYOK model so the picker has something selectable.
+    if chatgpt_passthrough_available():
         return "gpt-5.5"
-    # Prefer the native ChatGPT passthrough slug first
+    if models:
+        return models[0].slug
     return "gpt-5.5"

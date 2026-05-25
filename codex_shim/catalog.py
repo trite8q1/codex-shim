@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .settings import FactoryModel, PROVIDER_NAME, default_model_slug
+from .settings import FactoryModel, PROVIDER_NAME, chatgpt_passthrough_available, default_model_slug
 
 
 PLAN_TIERS = ["free", "plus", "pro", "team", "business", "enterprise"]
@@ -111,7 +111,9 @@ def chatgpt_passthrough_entry() -> dict:
 
 def write_catalog(models: list[FactoryModel], path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    entries = [chatgpt_passthrough_entry()]
+    entries: list[dict] = []
+    if chatgpt_passthrough_available():
+        entries.append(chatgpt_passthrough_entry())
     entries.extend(catalog_entry(model) for model in models)
     payload = {"models": entries}
     path.write_text(json.dumps(payload, indent=2, sort_keys=False) + "\n")

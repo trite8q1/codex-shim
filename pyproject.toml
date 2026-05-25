@@ -30,7 +30,7 @@ Repository = "https://github.com/0xSero/codex-shim"
 Issues = "https://github.com/0xSero/codex-shim/issues"
 
 [project.scripts]
-codex-shim = "codex_shim.cli:main"
+codex-shim = "codex_shim.cli:_entrypoint"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -12,7 +12,14 @@ import json
 from urllib.request import urlopen
 
 from .catalog import codex_config_overrides, write_catalog, write_config
-from .settings import DEFAULT_FACTORY_SETTINGS, DEFAULT_HOST, DEFAULT_PORT, FactorySettings, default_model_slug
+from .settings import (
+    DEFAULT_FACTORY_SETTINGS,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    FactorySettings,
+    chatgpt_passthrough_available,
+    default_model_slug,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -147,14 +154,20 @@ def install_codex_config(settings_path: Path, port: int, model_slug: str | None 
 
 def list_models(settings_path: Path) -> int:
     models = _load_models(settings_path)
-    rows = [("gpt-5.5", "GPT-5.5", "gpt-5.5", "chatgpt")]
+    rows: list[tuple[str, str, str, str]] = []
+    if chatgpt_passthrough_available():
+        rows.append(("gpt-5.5", "GPT-5.5", "gpt-5.5", "chatgpt"))
     rows.extend((model.slug, model.display_name, model.model, model.provider) for model in models)
-    width = max([len(row[0]) for row in rows] + [4])
-    try:
-        for slug, display_name, model, provider in rows:
-            print(f"{slug:<{width}}  {display_name}  ->  {model} ({provider})", flush=True)
-    except BrokenPipeError:
-        _silence_broken_pipe()
+    if not rows:
+        print(
+            "No models available. Either save Factory custom models or sign in to Codex "
+            "(`codex login`) so ~/.codex/auth.json grants the gpt-5.5 passthrough.",
+            file=sys.stderr,
+        )
+        return 1
+    width = max(len(row[0]) for row in rows)
+    for slug, display_name, model, provider in rows:
+        print(f"{slug:<{width}}  {display_name}  ->  {model} ({provider})", flush=True)
     return 0
 
 
@@ -478,6 +491,11 @@ def _resolve_model_slug(models, requested: str | None) -> str:
     if requested is None:
         return _current_managed_model() or default_model_slug(models)
     if requested in {"gpt-5.5", "openai-gpt-5-5"}:
+        if not chatgpt_passthrough_available():
+            raise SystemExit(
+                "gpt-5.5 passthrough requires a Codex login. "
+                "Run `codex login` so ~/.codex/auth.json contains tokens.access_token."
+            )
         return "gpt-5.5"
     by_slug = {model.slug: model.slug for model in models}
     by_model = {}
@@ -519,14 +537,6 @@ def _health(port: int) -> dict | None:
         return None
 
 
-def _silence_broken_pipe() -> None:
-    try:
-        sys.stdout.close()
-    except Exception:
-        pass
-    sys.stdout = open(os.devnull, "w")
-
-
 def _read_pid() -> int | None:
     try:
         return int(PID_PATH.read_text().strip())
@@ -544,5 +554,20 @@ def _pid_running(pid: int | None) -> bool:
         return False
 
 
+def _entrypoint() -> int:
+    try:
+        return main()
+    except BrokenPipeError:
+        # Downstream pipe (e.g. `codex-shim list | head`) closed early. Mute the
+        # interpreter's atexit flush so we exit cleanly instead of dumping a
+        # traceback to stderr.
+        try:
+            sys.stdout.flush()
+        except BrokenPipeError:
+            pass
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 0
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_entrypoint())

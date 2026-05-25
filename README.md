@@ -38,11 +38,13 @@ local:
 - **Prompt-catching/proxy-friendly architecture.** Put a local proxy in front
   of the shim to dedupe boilerplate, inject stable instructions, repair
   pseudo-tool text, or route prompts by policy before they hit an upstream.
-- **Maintainer benchmark result:** on repeated local coding-agent runs,
-  ChatGPT passthrough plus prompt catching/proxying measured about **7x fewer
-  billed input tokens** and **5-10x faster wall time** than the baseline path
-  for the same task shape. Treat that as a workload-specific result; the
-  benchmark section below shows how to measure your own setup.
+- **Maintainer-side wins on real coding-agent runs.** In the maintainer's
+  internal Codex tasks, ChatGPT passthrough plus a prompt-catching proxy in
+  front of the shim has produced multi-x reductions in billed input tokens
+  and noticeably faster wall time vs. the baseline route. No reproducible
+  benchmark script ships with the repo yet, so treat that as anecdata — the
+  benchmark section below explains how to measure your own setup against
+  an explicit oracle before quoting numbers.
 
 ---
 
@@ -62,7 +64,25 @@ local:
 
 ## Install
 
-Runtime install:
+Recommended (installs the `codex-shim` entry point from `pyproject.toml`):
+
+```bash
+git clone https://github.com/0xSero/codex-shim ~/codex-shim
+cd ~/codex-shim
+python3 -m pip install --user -e .
+```
+
+That pulls in `aiohttp` and puts `codex-shim` on your `PATH`. The
+`codex-app` and `codex-model` shortcuts live in `bin/`; symlink them if you
+want them on `PATH` too:
+
+```bash
+mkdir -p ~/.local/bin
+ln -sf "$PWD/bin/codex-app" ~/.local/bin/codex-app
+ln -sf "$PWD/bin/codex-model" ~/.local/bin/codex-model
+```
+
+Alternative (no install, run straight from the checkout):
 
 ```bash
 git clone https://github.com/0xSero/codex-shim ~/codex-shim
@@ -130,8 +150,9 @@ block can be removed with:
 codex-shim disable
 ```
 
-After this, Codex Desktop sees every entry from `~/.factory/settings.json` plus
-the `GPT-5.5` ChatGPT passthrough slug when `~/.codex/auth.json` is available.
+After this, Codex Desktop sees every entry from `~/.factory/settings.json`,
+plus the `GPT-5.5` ChatGPT passthrough slug if (and only if) `~/.codex/auth.json`
+holds a valid `tokens.access_token`.
 
 If your Codex Desktop's model picker only shows `default` and refuses to render
 the catalog entries, apply the macOS picker patch below.
@@ -161,9 +182,10 @@ codex-shim codex -- "inspect this repo and summarize the architecture"
 ## Custom config file
 
 The shim defaults to `~/.factory/settings.json` (the file Factory writes when
-you save BYOK custom models). If that file is missing, the shim still generates
-a catalog containing the ChatGPT passthrough entry. You can point it at any
-compatible file:
+you save BYOK custom models). If that file is missing, the shim still
+generates a catalog — and adds the `gpt-5.5` ChatGPT passthrough entry only
+when `~/.codex/auth.json` contains a valid `tokens.access_token`. You can
+point it at any compatible file:
 
 ```bash
 codex-shim --settings /path/to/my-models.json generate
@@ -305,6 +327,13 @@ exposes a synthetic `gpt-5.5` catalog entry that proxies straight to:
 ```text
 https://chatgpt.com/backend-api/codex/responses
 ```
+
+The entry is **only** advertised in `/health`, `/v1/models`, `codex-shim list`,
+and the generated `custom_model_catalog.json` while that token is present. Once
+you `codex logout` or the file is missing, the slug stops appearing — so the
+picker never shows an option that would 401 on first use. Run `codex login` to
+mint a new token and the entry comes back automatically on the next
+`codex-shim generate`.
 
 The passthrough keeps Codex's native `/v1/responses` payload intact, changes the
 model to `gpt-5.5`, and sends your Codex access token as `Authorization: Bearer
@@ -600,12 +629,25 @@ codex-shim --port 8766 app .
 
 ### `~/.factory/settings.json` is missing
 
-That is fine for ChatGPT passthrough-only use. `codex-shim generate` will still
-write a catalog containing `gpt-5.5`. For BYOK models, either save custom models
-in Factory or pass a compatible file:
+That is fine for ChatGPT passthrough-only use, **provided** `~/.codex/auth.json`
+has a valid `tokens.access_token`. In that case `codex-shim generate` writes a
+catalog containing just `gpt-5.5`. If neither file is present, the catalog will
+be empty and `codex-shim list` will exit non-zero with a hint to run
+`codex login` or pass a compatible settings file:
 
 ```bash
 codex-shim --settings /path/to/my-models.json generate
+```
+
+### `codex-shim list` exits 1 with "No models available"
+
+You have neither Factory custom models in `~/.factory/settings.json` nor a
+valid Codex login. Pick one:
+
+```bash
+codex login                       # populate ~/.codex/auth.json
+# or
+codex-shim --settings /path/to/my-models.json list
 ```
 
 ### Codex shows only `default`

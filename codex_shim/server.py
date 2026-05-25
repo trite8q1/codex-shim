@@ -9,7 +9,14 @@ from urllib.parse import urljoin
 
 from aiohttp import ClientSession, ClientTimeout, web
 
-from .settings import DEFAULT_FACTORY_SETTINGS, DEFAULT_HOST, DEFAULT_PORT, FactoryModel, FactorySettings
+from .settings import (
+    DEFAULT_FACTORY_SETTINGS,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    FactoryModel,
+    FactorySettings,
+    chatgpt_passthrough_available,
+)
 from .translate import (
     anthropic_to_chat_response,
     anthropic_to_response,
@@ -35,11 +42,20 @@ class ShimServer:
 
     async def health(self, _request: web.Request) -> web.Response:
         models = self.settings.load()
-        return web.json_response({"ok": True, "models": len(models) + 1})
+        count = len(models) + (1 if chatgpt_passthrough_available() else 0)
+        return web.json_response(
+            {
+                "ok": True,
+                "models": count,
+                "chatgpt_passthrough": chatgpt_passthrough_available(),
+            }
+        )
 
     async def models(self, _request: web.Request) -> web.Response:
         now = int(time.time())
-        data = [{"id": "gpt-5.5", "object": "model", "created": now, "owned_by": "chatgpt"}]
+        data: list[dict[str, Any]] = []
+        if chatgpt_passthrough_available():
+            data.append({"id": "gpt-5.5", "object": "model", "created": now, "owned_by": "chatgpt"})
         data.extend({"id": model.slug, "object": "model", "created": now, "owned_by": "factory"} for model in self.settings.load())
         return web.json_response({"object": "list", "data": data})
 
